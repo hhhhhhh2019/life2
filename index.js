@@ -1,19 +1,16 @@
-const ORGANIC_ENERGY = 100;
-const SUN_ENERGY = 50;
+const ORGANIC_ENERGY = 50;
+const SUN_ENERGY = 20;
 const SUN_LENGTH = 0.5;
-const ENERGY_TO_DOUBLE = 500;
+const ENERGY_TO_DOUBLE = 200;
 const DEAD_COLOR = "#404040";
 const LIFE_COLOR = "#e0a040";
-const MUTATION_KOOF = 0.0001;
-const MAX_KRISTALS = 10;
-const KRISTAL_KOOF = 1; //множитель для кристаллов
-const ENERGY_FOR_KRISTAL = 30; //енергия за кристалл
+var DRAW_DIRS = false;
 const TYPE_RENDER = 1; // 0 - просто клетки, 1 - их энергия
 
-const width = window.innerWidth;
-const height = window.innerHeight;
+const width = 1000;
+const height = 600;
 
-const mapWidth = 120;
+const mapWidth = 160;
 const mapHeight = Math.round(mapWidth * (height / width));
 
 const dx = width / mapWidth;
@@ -26,7 +23,7 @@ cnv.width = width;
 cnv.height = height;
 const ctx = cnv.getContext("2d");
 
-ctx.strokeStyle = "#000000";
+ctx.strokeStyle = "#ffffff";
 
 const chCoord = function(x, y) {
 	x = x < 0 ? mapWidth-1 : x % mapWidth;
@@ -64,22 +61,35 @@ const inInterval = function(a, b, c) {
 const isLike = function(a, b) {
 	let distinctions = 0;
 	for (let i = 0; i < a.dnk.length; i++) {
-		if (a.dnk[i] != b.dnk[i]) distinctions++;
+		if (a.dnk[i] != b.dnk[0]) distinctions++;
 		if (distinctions > 8) break;
 	}
 	return distinctions <= 8;
 }
 
+/* комманда, интевал, кол-во преходов, усл. перех		p - параметр
+	фотосинтез, 0..5, 0,
+	поворот, 6..11, 0,
+	посмотреть, 12..17, 4, пусто органика враг друг
+	шаг, 18..25, 4, пусто органика враг друг
+	съесть, 26..31, 0,
+	поделится энергией, 32..37, 0,
+	преобр. минералы в енергию, 38..45, 0,
+	окружен ли я, 46..51, 2, да(нету хотя-бы одной пустой клетки рядом) нет
+	сколько у меня энергии, 52..57, 2, больше(чем p * 15) меньше
+	размножится, 58..63, 0
+*/
+
 
 class Cell {
-	constructor(x, y, dnk, e) {
+	constructor(x, y, dnk, e, ls=-1) {
 		this.x = x;
 		this.y = y;
 		this.dnk = dnk;
 		this.dnk_offset = 0;
 		this.energy = e;
 		this.dir = Math.floor(Math.random()*8);
-		this.kristals = 0;
+		this.children = 0;
 	}
 
 	draw() {
@@ -87,106 +97,95 @@ class Cell {
 		else if (TYPE_RENDER == 0) ctx.fillStyle = LIFE_COLOR;
 		else ctx.fillStyle = `rgb(${this.energy / ENERGY_TO_DOUBLE * 255}, 0, 0)`;
 		ctx.fillRect(this.x * dx, this.y * dy, dx, dy);
-		ctx.strokeStyle = "white";
-		ctx.beginPath();
-		ctx.moveTo(this.x * dx + dx / 2, this.y * dy + dy / 2);
-		ctx.lineTo(this.x * dx + dx / 2 + num2dir(this.dir)[0] * (dx / 2), this.y * dy + dy / 2 + num2dir(this.dir)[1] * (dy / 2));
-		ctx.stroke();
+		if (DRAW_DIRS) {
+			ctx.beginPath();
+			ctx.moveTo(this.x * dx + dx / 2, this.y * dy + dy / 2);
+			ctx.lineTo(this.x * dx + dx / 2 + num2dir(this.dir)[0] * (dx / 2), this.y * dy + dy / 2 + num2dir(this.dir)[1] * (dy / 2));
+			ctx.stroke();
+		}
 	}
 
 	step() {
-        this.energy = Math.min(this.energy, ENERGY_TO_DOUBLE);
-        this.kristals = Math.min(this.kristals, MAX_KRISTALS);
-        if (this.kristals == MAX_KRISTALS) {
-        	this.energy += this.kristals * ENERGY_FOR_KRISTAL;
-        	this.kristals = 0;
-        }
-		
-		this.energy-=0.1;
-
-		//фотоситез
-		if (inInterval(0, 7, this.dnk[this.dnk_offset]) == true) {
-			this.energy += Math.max(0, (height * SUN_LENGTH - this.y * dy) / height * 2) * SUN_ENERGY;
-			this.kristals += Math.max(0, (height * (1-SUN_LENGTH) - (height - this.y * dy)) / height * 2) * KRISTAL_KOOF;
+		this.energy -= 0.1;
+		// фотосинтез
+        if (inInterval(0, 5, this.dnk[this.dnk_offset])) {
+			this.energy += Math.max(0, ((height * SUN_LENGTH - this.y * dy) / height * 2) * SUN_ENERGY);
 			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			return;
 		}
-
-		//поворот
-		if (inInterval(8, 15, this.dnk[this.dnk_offset]) == true) {
-			this.dir = (this.dir + 1) % 8;
-			this.energy -= 1;
+		// поворот
+		if (inInterval(6, 11, this.dnk[this.dnk_offset])) {
+			this.dir = (this.dir + this.dnk[this.dnk_offset+1]) % 8;
 			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
-			return;
-		}
-
-		//проверка спереди (ничего - 1, клетка - 2, органика - 3)
-		if (inInterval(16, 23, this.dnk[this.dnk_offset]) == true) {
-			let d = num2dir(this.dir);
-			let c = get(this.x + d[0], this.y + d[1]);
-			let offset = 1;
-			if (c != void 0 && c.energy > 0) offset = 2;
-			else if (c != void 0 && c.energy <= 0) offset = 3;
-			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
-			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
-			this.energy -= 1;
-			return;
-		}
-
-		//движение (ничего - 1, клетка - 2, органика - 3)
-		if (inInterval(24, 31, this.dnk[this.dnk_offset]) == true) {
-			let d = num2dir(this.dir);
-			let c = get(this.x + d[0], this.y + d[1]);
-			let offset = 1;
-			if (c == void 0) {
-				set(this.x, this.y, null);
-				[this.x, this.y] = set(this.x + d[0], this.y + d[1], this);
-			}
-			else if (c.energy > 0) offset = 2;
-			else if (c.energy <= 0) offset = 3;
-			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
-			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
-			this.energy -= 1;
-			return;
-		}
-
-		//съесть спереди (ничего - 1, клетка - 2, органика - 3)
-		if (inInterval(32, 39, this.dnk[this.dnk_offset]) == true) {
-			let d = num2dir(this.dir);
-			let c = get(this.x + d[0], this.y + d[1]);
-			let offset = 1;
-			set(this.x, this.y, null);
-			[this.x, this.y] = set(this.x + d[0], this.y + d[1], this);
-			if (c != void 0 && c.energy > 0) {
-				offset = 2;
-				this.energy += c.energy;
-			}
-			else if (c != void 0 && c.energy <= 0) {
-				offset = 3;
-				this.energy += ORGANIC_ENERGY;
-				this.kristals += c.kristals;
-			}
-			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
-			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
-			return;
-		}
-
-		//спереди свой? (да - 1, нет - 2)
-		if (inInterval(	40, 47, this.dnk[this.dnk_offset]) == true) {
-			let d = num2dir(this.dir);
-			let c = get(this.x + d[0], this.y + d[1]);
-			let offset = 2;
-			if (c != void 0) {
-				if (isLike(this, c) == true) offset = 1;
-			}
-			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
-			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
 			this.energy -= 0.5;
 			return;
 		}
-
-		//поделится энергией с соседями
-		if (inInterval(48, 55, this.dnk[this.dnk_offset]) == true) {
+		// посмотреть
+		if (inInterval(12, 17, this.dnk[this.dnk_offset])) {
+			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
+			let c = get(this.x + dir[0], this.y + dir[1]);
+			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
+			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
+			this.energy -= 1;
+			if (c == null) {
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			if (c.energy <= 0) {
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			if (isLike(this,c)) {
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 3) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 4) % this.dnk.length]) % this.dnk.length;
+			return;
+		}
+		// шаг
+		if (inInterval(18, 25, this.dnk[this.dnk_offset])) {
+			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
+			let c = get(this.x + dir[0], this.y + dir[1]);
+			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
+			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
+			if (c == null) {
+				set(this.x,this.y,null);
+				this.x += dir[0]; this.y += dir[1];
+				set(this.x,this.y,this);
+				this.energy -= 3;
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			if (c.energy <= 0) {
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			if (isLike(this,c)) {
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 3) % this.dnk.length]) % this.dnk.length;
+				return;
+			}
+			this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 4) % this.dnk.length]) % this.dnk.length;
+			return;
+		}
+		// съесть
+		if (inInterval(26, 31, this.dnk[this.dnk_offset])) {
+			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
+			let c = get(this.x + dir[0], this.y + dir[1]);
+			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
+			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
+			if (c == null) return;
+			set(this.x,this.y,null);
+			this.x += dir[0]; this.y += dir[1];
+			set(this.x,this.y,this);
+			if (c.energy <= 0) {
+				this.energy += ORGANIC_ENERGY
+				return;
+			}
+			this.energy += c.energy;
+			return;
+		}
+		// поделится энергией
+		if (inInterval(32, 37, this.dnk[this.dnk_offset])) {
 			let n = [];
 			for (let i = 0; i < 8; i++) {
 				let [x,y] = num2dir(i);
@@ -201,35 +200,60 @@ class Cell {
 				}
 			}
 		}
+		// преобр. минералы в енергию
+		if (inInterval(38, 45, this.dnk[this.dnk_offset])) {
+			return;
+		}
+		// окружен ли я
+		if (inInterval(46, 51, this.dnk[this.dnk_offset])) {
+			let n = [];
+			for (let i = 0; i < 8; i++) {
+				let [x,y] = num2dir(i);
+				let c = get(this.x + x, this.y + y);
+				if (c != void 0 && c.energy > 0) n.push(c);
+			}
 
-		//безусловный перех.
-		if (inInterval(56, 63, this.dnk[this.dnk_offset]) == true) {
-			let offset = this.dnk[(this.dnk_offset + 1) % this.dnk.length];
-			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
+			if (n == 8)
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
+			else
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
+		}
+		// сколько у меня энергии
+		if (inInterval(52, 57, this.dnk[this.dnk_offset])) {
+			if (this.energy < this.dnk[(this.dnk_offset + 1) % this.dnk.length] * 15)
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
+			else
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
+		}
+		// размножится
+		if (inInterval(58, 63, this.dnk[this.dnk_offset])) {
+			this.double();
 			return;
 		}
 	}
 
 	mutate() {
-		if (Math.random() <= MUTATION_KOOF)
-			this.dnk[Math.floor(Math.random() * this.dnk.length)] = Math.floor(Math.random()*64);
+		this.dnk[Math.floor(Math.random() * this.dnk.length)] = Math.floor(Math.random()*64);
 	}
 
 	double() {
-		if (this.energy >= ENERGY_TO_DOUBLE) {
-			let d;
-			for (let i = 0; i < 8; i++) {
-				d = num2dir((this.dir + i) % 8);
-				if (get(this.x + d[0], this.y + d[1]) == null) {
-					this.energy /= 2;
-					let [x, y] = chCoord(this.x + d[0], this.y + d[1])
-					set(x, y, new Cell(x, y, this.dnk, this.energy));
-					return;
-				}
-			}
-
-			//this.energy = 0;
+		if (this.energy < ORGANIC_ENERGY) {
+			return;
 		}
+		let d;
+		for (let i = 0; i < 8; i++) {
+			d = num2dir((this.dir + i) % 8);
+			if (get(this.x + d[0], this.y + d[1]) == null) {
+				this.energy /= 2;
+				let [x, y] = chCoord(this.x + d[0], this.y + d[1])
+				set(x, y, new Cell(x, y, this.dnk.slice(0, this.dnk.length), this.energy, this.last_step));
+				if (this.children % 4 == 0) get(x, y).mutate();
+				this.children++;
+				return;
+			}
+		}
+
+		this.energy = 0;
 	}
 }
 
@@ -243,42 +267,36 @@ const mix = function(a, b, c) {
 	return (a * c) + (b * (1 - c));
 }
 
-//const p = document.getElementById("p")
-
 const update = function() {
 	let lively = 0;
 
 	for (let i = 0; i < height; i++) {
-		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 4);
-		let r = mix(255, 100, c);
-		let g = mix(255, 200, c);
-		let b = mix(0, 255, c);
+		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 5);
+		let r = mix(255, 80, c);
+		let g = mix(255, 150, c);
+		let b = mix(0, 200, c);
 		ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
 		ctx.fillRect(0, i, width, 1);
 	}
 
-	let nmap = map.slice(0, map.length); // против копирования
+	let nmap = map.slice(0, map.length);
 
 	for (let i = 0; i < nmap.length; i++) {
-		if (nmap[i] == void 0) continue;
+		if (nmap[i] == null) continue;
+
+		nmap[i].draw();
 
 		if (nmap[i].energy > 0) {
 			nmap[i].step();
-			nmap[i].double();
-			nmap[i].mutate();
+			if (nmap[i].energy >= ENERGY_TO_DOUBLE)
+				nmap[i].double();
 			lively++;
-		} else {
-			if (get(nmap[i].x, nmap[i].y+1) == null) {
-				set(nmap[i].x, nmap[i].y+1, nmap[i]);
-				set(nmap[i].x, nmap[i].y, null);
-				nmap[i].y++;
-			}
+		} else if (get(nmap[i].x, nmap[i].y+1) == null) {
+			set(nmap[i].x, nmap[i].y+1, nmap[i]);
+			set(nmap[i].x, nmap[i].y, null);
+			nmap[i].y++;
 		}
-		
-		nmap[i].draw();
 	}
-	
-	//p.innerHTML = Math.random();
 
 	if (lively > 0)
 		requestAnimationFrame(update);
