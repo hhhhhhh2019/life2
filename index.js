@@ -1,17 +1,20 @@
-const ORGANIC_ENERGY = 50;
+const ORGANIC_ENERGY = 100;
 const SUN_ENERGY = 50;
-const SUN_LENGTH = 0.7;
-const ENERGY_TO_DOUBLE = 400;
+const SUN_LENGTH = 0.5;
+const ENERGY_TO_DOUBLE = 500;
 const DEAD_COLOR = "#404040";
 const LIFE_COLOR = "#e0a040";
-const MUTATION_KOOF = 0.001;
+const MUTATION_KOOF = 0.0001;
+const MAX_KRISTALS = 10;
+const KRISTAL_KOOF = 1; //множитель для кристаллов
+const ENERGY_FOR_KRISTAL = 30; //енергия за кристалл
 const TYPE_RENDER = 1; // 0 - просто клетки, 1 - их энергия
 
-const width = 800;
-const height = 600;
+const width = window.innerWidth;
+const height = window.innerHeight;
 
-const mapWidth = 100;
-const mapHeight = mapWidth * (height / width);
+const mapWidth = 120;
+const mapHeight = Math.round(mapWidth * (height / width));
 
 const dx = width / mapWidth;
 const dy = height / mapHeight;
@@ -61,7 +64,7 @@ const inInterval = function(a, b, c) {
 const isLike = function(a, b) {
 	let distinctions = 0;
 	for (let i = 0; i < a.dnk.length; i++) {
-		if (a.dnk[i] != b.dnk[0]) distinctions++;
+		if (a.dnk[i] != b.dnk[i]) distinctions++;
 		if (distinctions > 8) break;
 	}
 	return distinctions <= 8;
@@ -76,6 +79,7 @@ class Cell {
 		this.dnk_offset = 0;
 		this.energy = e;
 		this.dir = Math.floor(Math.random()*8);
+		this.kristals = 0;
 	}
 
 	draw() {
@@ -83,20 +87,27 @@ class Cell {
 		else if (TYPE_RENDER == 0) ctx.fillStyle = LIFE_COLOR;
 		else ctx.fillStyle = `rgb(${this.energy / ENERGY_TO_DOUBLE * 255}, 0, 0)`;
 		ctx.fillRect(this.x * dx, this.y * dy, dx, dy);
+		ctx.strokeStyle = "white";
 		ctx.beginPath();
-		ctx.moveTo(this.x * dx + dx / 2, this.y * dx + dy / 2);
-		ctx.lineTo(this.x * dx + dx / 2 + num2dir(this.dir)[0] * (dx / 2), this.y * dx + dy / 2 + num2dir(this.dir)[1] * (dy / 2));
+		ctx.moveTo(this.x * dx + dx / 2, this.y * dy + dy / 2);
+		ctx.lineTo(this.x * dx + dx / 2 + num2dir(this.dir)[0] * (dx / 2), this.y * dy + dy / 2 + num2dir(this.dir)[1] * (dy / 2));
 		ctx.stroke();
 	}
 
 	step() {
-        this.energy = Math.min(this.energy, ENERGY_TO_DOUBLE)
+        this.energy = Math.min(this.energy, ENERGY_TO_DOUBLE);
+        this.kristals = Math.min(this.kristals, MAX_KRISTALS);
+        if (this.kristals == MAX_KRISTALS) {
+        	this.energy += this.kristals * ENERGY_FOR_KRISTAL;
+        	this.kristals = 0;
+        }
 		
 		this.energy-=0.1;
 
 		//фотоситез
 		if (inInterval(0, 7, this.dnk[this.dnk_offset]) == true) {
 			this.energy += Math.max(0, (height * SUN_LENGTH - this.y * dy) / height * 2) * SUN_ENERGY;
+			this.kristals += Math.max(0, (height * (1-SUN_LENGTH) - (height - this.y * dy)) / height * 2) * KRISTAL_KOOF;
 			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			return;
 		}
@@ -135,7 +146,7 @@ class Cell {
 			else if (c.energy <= 0) offset = 3;
 			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
 			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
-			this.energy -= 3;
+			this.energy -= 1;
 			return;
 		}
 
@@ -153,6 +164,7 @@ class Cell {
 			else if (c != void 0 && c.energy <= 0) {
 				offset = 3;
 				this.energy += ORGANIC_ENERGY;
+				this.kristals += c.kristals;
 			}
 			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
 			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
@@ -169,7 +181,7 @@ class Cell {
 			}
 			offset = this.dnk[(this.dnk_offset + offset) % this.dnk.length];
 			this.dnk_offset = (this.dnk_offset + offset) % this.dnk.length;
-			this.energy -= 1;
+			this.energy -= 0.5;
 			return;
 		}
 
@@ -178,13 +190,12 @@ class Cell {
 			let n = [];
 			for (let i = 0; i < 8; i++) {
 				let [x,y] = num2dir(i);
-				x += this.x; y += this.y;
-				let c = get(x, y);
-				if (c != void 0 && c.energy > 0) n.push(c);
+				let c = get(this.x + x, this.y + y);
+				if (c != void 0 && c.energy > 0 && c != this) n.push(c);
 			}
 
 			if (n.length > 0) {
-				this.energy /= n.length;
+				this.energy /= n.length + 1;
 				for (let i = 0; i < n.length; i++) {
 					n[i].energy += this.energy;
 				}
@@ -200,7 +211,7 @@ class Cell {
 	}
 
 	mutate() {
-		if (Math.random() < MUTATION_KOOF)
+		if (Math.random() <= MUTATION_KOOF)
 			this.dnk[Math.floor(Math.random() * this.dnk.length)] = Math.floor(Math.random()*64);
 	}
 
@@ -232,14 +243,16 @@ const mix = function(a, b, c) {
 	return (a * c) + (b * (1 - c));
 }
 
+//const p = document.getElementById("p")
+
 const update = function() {
 	let lively = 0;
 
 	for (let i = 0; i < height; i++) {
-		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 2);
-		let r = mix(255, 30, c);
-		let g = mix(255, 60, c);
-		let b = mix(0, 200, c);
+		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 4);
+		let r = mix(255, 100, c);
+		let g = mix(255, 200, c);
+		let b = mix(0, 255, c);
 		ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
 		ctx.fillRect(0, i, width, 1);
 	}
@@ -254,10 +267,18 @@ const update = function() {
 			nmap[i].double();
 			nmap[i].mutate();
 			lively++;
+		} else {
+			if (get(nmap[i].x, nmap[i].y+1) == null) {
+				set(nmap[i].x, nmap[i].y+1, nmap[i]);
+				set(nmap[i].x, nmap[i].y, null);
+				nmap[i].y++;
+			}
 		}
 		
 		nmap[i].draw();
 	}
+	
+	//p.innerHTML = Math.random();
 
 	if (lively > 0)
 		requestAnimationFrame(update);
