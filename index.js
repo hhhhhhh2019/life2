@@ -1,17 +1,21 @@
 const ORGANIC_ENERGY = 50;
 const SUN_ENERGY = 50;
 const SUN_LENGTH = 0.5;
-const ENERGY_TO_DOUBLE = 200;
+const ENERGY_TO_DOUBLE = 1000;
 const DEAD_COLOR = "#808080";
 const LIFE_COLOR = "#e0a040";
-const MUTATION_KOOF = 0.001;
+const MUTATION_KOOF = 0.0001;
 var DRAW_DIRS = false;
+const KRISTALS_KOOF = 3; // тоже то и SUN_ENERGY, но для кристаллов
+const KRISTALS_ENERGY = 1;
 const TYPE_RENDER = 1; // 0 - просто клетки, 1 - их энергия
+var SKIP_FRAMES = false;
+var DRAW = true;
 
-const width = 600;
-const height = 280;
+const width = 1000;
+const height = 600;
 
-const mapWidth = 100;
+const mapWidth = 150;
 const mapHeight = Math.round(mapWidth * (height / width));
 
 const dx = width / mapWidth;
@@ -92,9 +96,11 @@ class Cell {
 		this.energy = e;
 		this.dir = Math.floor(Math.random()*8);
 		this.children = 0;
+		this.kristals = 0;
 	}
 
 	draw() {
+		if (DRAW == false) return;
 		if (this.energy <= 0) ctx.fillStyle = DEAD_COLOR;
 		else if (TYPE_RENDER == 0) ctx.fillStyle = LIFE_COLOR;
 		else ctx.fillStyle = `rgb(${this.energy / ENERGY_TO_DOUBLE * 255}, 0, 0)`;
@@ -108,10 +114,11 @@ class Cell {
 	}
 
 	step() {
-		this.energy -= 0.1;
+		this.energy -= 3;
+		this.kristals += Math.round(Math.max(0, ((height * (1-SUN_LENGTH+0.01) - (height - this.y * dy)) / height * 2) * KRISTALS_KOOF));
 		// фотосинтез
         if (inInterval(0, 5, this.dnk[this.dnk_offset])) {
-			this.energy += Math.max(0, ((height * SUN_LENGTH - this.y * dy) / height * 2) * SUN_ENERGY);
+			this.energy += Math.round(Math.max(0, ((height * (SUN_LENGTH+0.01) - this.y * dy) / height * 2) * SUN_ENERGY));
 			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			return;
 		}
@@ -119,7 +126,7 @@ class Cell {
 		if (inInterval(6, 10, this.dnk[this.dnk_offset])) {
 			this.dir = (this.dir + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % 8;
 			this.dnk_offset = (this.dnk_offset + 2) % this.dnk.length;
-			this.energy -= 0.5;
+			//this.energy -= 1;
 			return;
 		}
 		// посмотреть
@@ -128,7 +135,7 @@ class Cell {
 			let c = get(this.x + dir[0], this.y + dir[1]);
 			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
 			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
-			this.energy -= 1;
+			//this.energy -= 1;
 			if (c == null) {
 				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
 				return;
@@ -147,7 +154,7 @@ class Cell {
 		// шаг
 		if (inInterval(17, 22, this.dnk[this.dnk_offset])) {
 			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
-			let c = get(...chCoord(this.x + dir[0], this.y + dir[1]));
+			let c = get(this.x + dir[0], this.y + dir[1]);
 			if (c == null) {
 				set(this.x,this.y,null);
 				this.x += dir[0]; this.y += dir[1];
@@ -176,7 +183,7 @@ class Cell {
 			this.x += dir[0]; this.y += dir[1];
 			set(this.x,this.y,this);
 			if (c.energy <= 0) {
-				this.energy += ORGANIC_ENERGY
+				this.energy += ORGANIC_ENERGY;
 				return;
 			}
 			this.energy += c.energy - 5;
@@ -193,12 +200,15 @@ class Cell {
 			}
 
 			this.energy /= n.length + 1;
+			this.energy = Math.floor(this.energy);
 			for (let i = 0; i < n.length; i++) {
 				n[i].energy += this.energy;
 			}
 		}
 		// преобр. минералы в енергию
 		if (inInterval(35, 39, this.dnk[this.dnk_offset])) {
+			this.energy += this.kristals * KRISTALS_KOOF;
+			this.kristals = 0;
 			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			return;
 		}
@@ -241,12 +251,12 @@ class Cell {
 	}
 
 	double() {
-		if (this.energy < ORGANIC_ENERGY) return;
+		if (this.energy < ORGANIC_ENERGY * 2) return;
 		let d;
 		for (let i = 0; i < 8; i++) {
 			d = num2dir((this.dir + i) % 8);
 			if (get(this.x + d[0], this.y + d[1]) == null) {
-				this.energy /= 2;
+				this.energy = Math.floor(this.energy / 2.1);
 				let [x, y] = chCoord(this.x + d[0], this.y + d[1])
 				set(x, y, new Cell(x, y, this.dnk.slice(0, this.dnk.length), this.energy, this.last_step));
 				if (this.children % 4 == 0) get(x, y).mutate();
@@ -263,17 +273,19 @@ let dnk = [];
 
 for (let i = 0; i < 64; i++) dnk.push(0);
 
-map[0] = new Cell(0, 0, dnk, ENERGY_TO_DOUBLE/2);
+set(Math.round(mapWidth / 2), Math.round(mapHeight / 3), new Cell(Math.round(mapWidth / 2), Math.round(mapHeight / 3), dnk, ENERGY_TO_DOUBLE/2));
 
 const mix = function(a, b, c) {
 	return (a * c) + (b * (1 - c));
 }
 
+var frames = 0;
+
 const update = function() {
 	let lively = 0;
 
 	for (let i = 0; i < height; i++) {
-		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 5);
+		let c = Math.max(0, (height * (SUN_LENGTH+0.01) - i) / height * 5);
 		let r = mix(255, 200, c);
 		let g = mix(255, 230, c);
 		let b = mix(0, 255, c);
@@ -286,7 +298,13 @@ const update = function() {
 	for (let i = 0; i < nmap.length; i++) {
 		if (nmap[i] == null) continue;
 
-		nmap[i].draw();
+		if (SKIP_FRAMES)
+			if (frames % 30 == 0)
+				nmap[i].draw();
+			else
+				nmap[i].draw();
+		else
+			nmap[i].draw();
 
 		if (nmap[i].energy > 0) {
 			nmap[i].step();
@@ -302,9 +320,17 @@ const update = function() {
 		}
 	}
 
-	if (lively > 0)
-		requestAnimationFrame(update);
-	else
+	frames++;
+
+	if (lively > 0) {
+		if (SKIP_FRAMES)
+			if (frames % 30 == 0)
+				requestAnimationFrame(update);
+			else
+				update();
+		else
+			requestAnimationFrame(update);
+	} else
 		document.location.reload();
 }
 
