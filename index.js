@@ -1,16 +1,17 @@
 const ORGANIC_ENERGY = 50;
-const SUN_ENERGY = 20;
+const SUN_ENERGY = 50;
 const SUN_LENGTH = 0.5;
 const ENERGY_TO_DOUBLE = 200;
-const DEAD_COLOR = "#404040";
+const DEAD_COLOR = "#808080";
 const LIFE_COLOR = "#e0a040";
+const MUTATION_KOOF = 0.001;
 var DRAW_DIRS = false;
 const TYPE_RENDER = 1; // 0 - просто клетки, 1 - их энергия
 
-const width = 1000;
-const height = 600;
+const width = 600;
+const height = 280;
 
-const mapWidth = 160;
+const mapWidth = 100;
 const mapHeight = Math.round(mapWidth * (height / width));
 
 const dx = width / mapWidth;
@@ -69,15 +70,16 @@ const isLike = function(a, b) {
 
 /* комманда, интевал, кол-во преходов, усл. перех		p - параметр
 	фотосинтез, 0..5, 0,
-	поворот, 6..11, 0,
-	посмотреть, 12..17, 4, пусто органика враг друг
-	шаг, 18..25, 4, пусто органика враг друг
-	съесть, 26..31, 0,
-	поделится энергией, 32..37, 0,
-	преобр. минералы в енергию, 38..45, 0,
-	окружен ли я, 46..51, 2, да(нету хотя-бы одной пустой клетки рядом) нет
-	сколько у меня энергии, 52..57, 2, больше(чем p * 15) меньше
-	размножится, 58..63, 0
+	поворот, 6..10, 0,
+	посмотреть, 11..16, 4, пусто органика враг друг
+	шаг, 17..22, 4, пусто органика враг друг
+	съесть, 23..28, 0,
+	поделится энергией, 29..33, 0,
+	преобр. минералы в енергию, 35..39, 0,
+	окружен ли я, 40..45, 2, да(нету хотя-бы одной пустой клетки рядом) нет
+	сколько у меня энергии, 46..50, 2, больше(чем p * 15) меньше
+	размножится, 51..56, 0,
+	без усл. перех, 57..63
 */
 
 
@@ -114,14 +116,14 @@ class Cell {
 			return;
 		}
 		// поворот
-		if (inInterval(6, 11, this.dnk[this.dnk_offset])) {
-			this.dir = (this.dir + this.dnk[this.dnk_offset+1]) % 8;
-			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
+		if (inInterval(6, 10, this.dnk[this.dnk_offset])) {
+			this.dir = (this.dir + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % 8;
+			this.dnk_offset = (this.dnk_offset + 2) % this.dnk.length;
 			this.energy -= 0.5;
 			return;
 		}
 		// посмотреть
-		if (inInterval(12, 17, this.dnk[this.dnk_offset])) {
+		if (inInterval(11, 16, this.dnk[this.dnk_offset])) {
 			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
 			let c = get(this.x + dir[0], this.y + dir[1]);
 			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
@@ -143,11 +145,9 @@ class Cell {
 			return;
 		}
 		// шаг
-		if (inInterval(18, 25, this.dnk[this.dnk_offset])) {
+		if (inInterval(17, 22, this.dnk[this.dnk_offset])) {
 			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
-			let c = get(this.x + dir[0], this.y + dir[1]);
-			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
-			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
+			let c = get(...chCoord(this.x + dir[0], this.y + dir[1]));
 			if (c == null) {
 				set(this.x,this.y,null);
 				this.x += dir[0]; this.y += dir[1];
@@ -168,12 +168,10 @@ class Cell {
 			return;
 		}
 		// съесть
-		if (inInterval(26, 31, this.dnk[this.dnk_offset])) {
+		if (inInterval(23, 28, this.dnk[this.dnk_offset])) {
 			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
-			let c = get(this.x + dir[0], this.y + dir[1]);
-			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
-			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
-			if (c == null) return;
+			let c = get(...chCoord(this.x + dir[0], this.y + dir[1]));
+			if (c == null || c == this) return;
 			set(this.x,this.y,null);
 			this.x += dir[0]; this.y += dir[1];
 			set(this.x,this.y,this);
@@ -181,11 +179,12 @@ class Cell {
 				this.energy += ORGANIC_ENERGY
 				return;
 			}
-			this.energy += c.energy;
+			this.energy += c.energy - 5;
 			return;
 		}
 		// поделится энергией
-		if (inInterval(32, 37, this.dnk[this.dnk_offset])) {
+		if (inInterval(29, 34, this.dnk[this.dnk_offset])) {
+			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			let n = [];
 			for (let i = 0; i < 8; i++) {
 				let [x,y] = num2dir(i);
@@ -193,24 +192,23 @@ class Cell {
 				if (c != void 0 && c.energy > 0 && c != this) n.push(c);
 			}
 
-			if (n.length > 0) {
-				this.energy /= n.length + 1;
-				for (let i = 0; i < n.length; i++) {
-					n[i].energy += this.energy;
-				}
+			this.energy /= n.length + 1;
+			for (let i = 0; i < n.length; i++) {
+				n[i].energy += this.energy;
 			}
 		}
 		// преобр. минералы в енергию
-		if (inInterval(38, 45, this.dnk[this.dnk_offset])) {
+		if (inInterval(35, 39, this.dnk[this.dnk_offset])) {
+			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
 			return;
 		}
 		// окружен ли я
-		if (inInterval(46, 51, this.dnk[this.dnk_offset])) {
+		if (inInterval(40, 45, this.dnk[this.dnk_offset])) {
 			let n = [];
 			for (let i = 0; i < 8; i++) {
 				let [x,y] = num2dir(i);
 				let c = get(this.x + x, this.y + y);
-				if (c != void 0 && c.energy > 0) n.push(c);
+				if (c != null && c.energy > 0) n.push(c);
 			}
 
 			if (n == 8)
@@ -219,15 +217,21 @@ class Cell {
 				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
 		}
 		// сколько у меня энергии
-		if (inInterval(52, 57, this.dnk[this.dnk_offset])) {
+		if (inInterval(46, 50, this.dnk[this.dnk_offset])) {
 			if (this.energy < this.dnk[(this.dnk_offset + 1) % this.dnk.length] * 15)
-				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
-			else
 				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 2) % this.dnk.length]) % this.dnk.length;
+			else
+				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 3) % this.dnk.length]) % this.dnk.length;
 		}
 		// размножится
-		if (inInterval(58, 63, this.dnk[this.dnk_offset])) {
+		if (inInterval(51, 56, this.dnk[this.dnk_offset])) {
 			this.double();
+			this.dnk_offset = (this.dnk_offset + 1) % this.dnk.length;
+			return;
+		}
+		// без усл. перех.
+		if (inInterval(57, 63, this.dnk[this.dnk_offset])) {
+			this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
 			return;
 		}
 	}
@@ -237,9 +241,7 @@ class Cell {
 	}
 
 	double() {
-		if (this.energy < ORGANIC_ENERGY) {
-			return;
-		}
+		if (this.energy < ORGANIC_ENERGY) return;
 		let d;
 		for (let i = 0; i < 8; i++) {
 			d = num2dir((this.dir + i) % 8);
@@ -259,7 +261,7 @@ class Cell {
 
 let dnk = [];	
 
-for (let i = 0; i < 64; i++) dnk.push(0)//Math.floor(Math.random()*64));
+for (let i = 0; i < 64; i++) dnk.push(0);
 
 map[0] = new Cell(0, 0, dnk, ENERGY_TO_DOUBLE/2);
 
@@ -272,9 +274,9 @@ const update = function() {
 
 	for (let i = 0; i < height; i++) {
 		let c = Math.max(0, (height * SUN_LENGTH - i) / height * 5);
-		let r = mix(255, 80, c);
-		let g = mix(255, 150, c);
-		let b = mix(0, 200, c);
+		let r = mix(255, 200, c);
+		let g = mix(255, 230, c);
+		let b = mix(0, 255, c);
 		ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
 		ctx.fillRect(0, i, width, 1);
 	}
@@ -288,6 +290,8 @@ const update = function() {
 
 		if (nmap[i].energy > 0) {
 			nmap[i].step();
+			if (Math.random() < MUTATION_KOOF)
+				nmap[i].mutate();
 			if (nmap[i].energy >= ENERGY_TO_DOUBLE)
 				nmap[i].double();
 			lively++;
