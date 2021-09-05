@@ -14,11 +14,16 @@
 
 			canvas {
 				background: white;
+				image-rendering: pixelated;
 			}
 		</style>
 	</head>
 	<body>
 		<canvas id="cnv"></canvas>
 		<script src='index.js'></script>
+		<button onclick="DRAW_DIRS=!DRAW_DIRS">Направления</button>
+		<button onclick="TYPE_RENDER=1-TYPE_RENDER">Тип рендера</button>
+		<button onclick="SKIP_FRAMES=!SKIP_FRAMES">Пропуск кадров</button>
+		<button onclick="DRAW=!DRAW">Рендер</button>
 	</body>
 </html>

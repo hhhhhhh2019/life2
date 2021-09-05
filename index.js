@@ -4,22 +4,25 @@ const SUN_LENGTH = 0.5;
 const ENERGY_TO_DOUBLE = 1000;
 const DEAD_COLOR = "#808080";
 const LIFE_COLOR = "#e0a040";
-const MUTATION_KOOF = 0.0001;
+const MUTATION_KOOF = 0.00001;
 var DRAW_DIRS = false;
 const KRISTALS_KOOF = 3; // тоже то и SUN_ENERGY, но для кристаллов
 const KRISTALS_ENERGY = 1;
-const TYPE_RENDER = 1; // 0 - просто клетки, 1 - их энергия
+var TYPE_RENDER = 0;
 var SKIP_FRAMES = false;
 var DRAW = true;
 
-const width = 1000;
-const height = 600;
+// ВНИМАНИЕ
+// ширина должна делится на ширину карты
 
-const mapWidth = 150;
+const width = 360;
+const height = 360;
+
+const mapWidth = 90;
 const mapHeight = Math.round(mapWidth * (height / width));
 
-const dx = width / mapWidth;
-const dy = height / mapHeight;
+const dx = Math.round(width / mapWidth);
+const dy = Math.round(height / mapHeight);
 
 var map = new Array(mapWidth * mapHeight);
 
@@ -88,7 +91,7 @@ const isLike = function(a, b) {
 
 
 class Cell {
-	constructor(x, y, dnk, e, ls=-1) {
+	constructor(x, y, dnk, e) {
 		this.x = x;
 		this.y = y;
 		this.dnk = dnk;
@@ -101,10 +104,16 @@ class Cell {
 
 	draw() {
 		if (DRAW == false) return;
-		if (this.energy <= 0) ctx.fillStyle = DEAD_COLOR;
-		else if (TYPE_RENDER == 0) ctx.fillStyle = LIFE_COLOR;
-		else ctx.fillStyle = `rgb(${this.energy / ENERGY_TO_DOUBLE * 255}, 0, 0)`;
-		ctx.fillRect(this.x * dx, this.y * dy, dx, dy);
+		if (this.energy <= 0) {
+			ctx.fillStyle = DEAD_COLOR;
+			ctx.fillRect(this.x * dx + 1, this.y * dy + 1, dx - 2, dy - 2);
+		} else {
+			if (TYPE_RENDER == 0)
+				ctx.fillStyle = `rgb(${this.energy / ENERGY_TO_DOUBLE * 255}, 0, 0)`;
+			else
+				ctx.fillStyle = `rgb(0, 0, ${this.kristals / 1000 * 255})`;
+			ctx.fillRect(this.x * dx, this.y * dy, dx, dy);
+		}
 		if (DRAW_DIRS) {
 			ctx.beginPath();
 			ctx.moveTo(this.x * dx + dx / 2, this.y * dy + dy / 2);
@@ -116,6 +125,7 @@ class Cell {
 	step() {
 		this.energy -= 3;
 		this.kristals += Math.round(Math.max(0, ((height * (1-SUN_LENGTH+0.01) - (height - this.y * dy)) / height * 2) * KRISTALS_KOOF));
+		this.kristals = Math.min(1000, this.kristals); 
 		// фотосинтез
         if (inInterval(0, 5, this.dnk[this.dnk_offset])) {
 			this.energy += Math.round(Math.max(0, ((height * (SUN_LENGTH+0.01) - this.y * dy) / height * 2) * SUN_ENERGY));
@@ -126,16 +136,14 @@ class Cell {
 		if (inInterval(6, 10, this.dnk[this.dnk_offset])) {
 			this.dir = (this.dir + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % 8;
 			this.dnk_offset = (this.dnk_offset + 2) % this.dnk.length;
-			//this.energy -= 1;
+			this.energy -= 1;
 			return;
 		}
 		// посмотреть
 		if (inInterval(11, 16, this.dnk[this.dnk_offset])) {
 			let dir = num2dir((this.dir+this.dnk[(this.dnk_offset + 1) % this.dnk.length])%8);
 			let c = get(this.x + dir[0], this.y + dir[1]);
-			if (this.x + dir[0] < 0 || this.x + dir[0] >= mapWidth) return;
-			if (this.y + dir[1] < 0 || this.y + dir[1] >= mapHeight) return;
-			//this.energy -= 1;
+			this.energy -= 2;
 			if (c == null) {
 				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
 				return;
@@ -158,6 +166,7 @@ class Cell {
 			if (c == null) {
 				set(this.x,this.y,null);
 				this.x += dir[0]; this.y += dir[1];
+				[this.x, this.y] = chCoord(this.x, this.y);
 				set(this.x,this.y,this);
 				this.energy -= 3;
 				this.dnk_offset = (this.dnk_offset + this.dnk[(this.dnk_offset + 1) % this.dnk.length]) % this.dnk.length;
@@ -181,6 +190,7 @@ class Cell {
 			if (c == null || c == this) return;
 			set(this.x,this.y,null);
 			this.x += dir[0]; this.y += dir[1];
+			[this.x, this.y] = chCoord(this.x, this.y);
 			set(this.x,this.y,this);
 			if (c.energy <= 0) {
 				this.energy += ORGANIC_ENERGY;
@@ -258,7 +268,7 @@ class Cell {
 			if (get(this.x + d[0], this.y + d[1]) == null) {
 				this.energy = Math.floor(this.energy / 2.1);
 				let [x, y] = chCoord(this.x + d[0], this.y + d[1])
-				set(x, y, new Cell(x, y, this.dnk.slice(0, this.dnk.length), this.energy, this.last_step));
+				set(x, y, new Cell(x, y, this.dnk.slice(0, this.dnk.length), this.energy));
 				if (this.children % 4 == 0) get(x, y).mutate();
 				this.children++;
 				return;
@@ -314,9 +324,10 @@ const update = function() {
 				nmap[i].double();
 			lively++;
 		} else if (get(nmap[i].x, nmap[i].y+1) == null) {
-			set(nmap[i].x, nmap[i].y+1, nmap[i]);
-			set(nmap[i].x, nmap[i].y, null);
-			nmap[i].y++;
+			let c = nmap[i];
+			set(c.x, c.y, null);
+			[c.x, c.y] = chCoord(c.x, c.y+1);
+			set(c.x, c.y, c);
 		}
 	}
 
